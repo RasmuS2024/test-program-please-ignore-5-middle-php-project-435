@@ -23,38 +23,61 @@
 ```bash
 git clone https://github.com/RasmuS2024/test-program-please-ignore-5-middle-php-project-435.git
 cd test-program-please-ignore-5-middle-php-project-435
+make install
+```
+
+Скопируйте шаблон окружения и задайте пароль PostgreSQL:
+
+```bash
+[ -f .env ] || cp .env.example .env
+# измените DB_PASSWORD и DATABASE_URL
 ```
 
 ### База данных
 
-Проект использует PostgreSQL 16. Для локальной разработки база запускается в отдельном Docker-контейнере на порту `5433`:
+Проект использует PostgreSQL 16. Для локальной разработки можно запустить отдельный контейнер на порту `5433`:
 
 ```bash
-[ -f .env ] || cp .env.example .env
-# задайте DB_PASSWORD в .env
-./scripts/db.sh start
-./scripts/db.sh status
+docker run -d \
+  --name hexlet-store-postgres \
+  -e POSTGRES_DB=store \
+  -e POSTGRES_USER=store \
+  -e POSTGRES_PASSWORD=change-me \
+  -p 127.0.0.1:5433:5432 \
+  -v hexlet-store-pgdata:/var/lib/postgresql/data \
+  postgres:16-alpine
 ```
 
-Подключение к базе:
+Пароль должен совпадать с `DB_PASSWORD` и `DATABASE_URL` в `.env`. Порт `5432` не используется, чтобы не конфликтовать с другим PostgreSQL. Если контейнер уже создан, запустите его командой `docker start hexlet-store-postgres`.
+
+## Запуск
 
 ```bash
-./scripts/db.sh psql
+make start
 ```
 
-Остановка:
+Приложение слушает `0.0.0.0:8080` или порт из переменной `PORT`:
 
 ```bash
-./scripts/db.sh stop
+PORT=9000 make start
 ```
 
-Порт `5432` намеренно не используется: он может быть занят другим PostgreSQL.
+Проверка API:
 
-<!-- Установка зависимостей и запуск приложения появятся после выбора фреймворка. -->
+```bash
+curl http://localhost:8080/api/health
+# {"status":"ok"}
+```
 
-## Использование
+Статика и API работают на одном порту: API — по путям `/api/...`, статика — из каталога `public/`.
 
-<!-- Добавьте примеры запуска и запись asciinema — именно это смотрит работодатель -->
+## Проверки
+
+```bash
+make test
+make lint
+make check
+```
 
 ---
 

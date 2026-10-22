@@ -1,0 +1,6 @@
+{
+  "name": "@hexlet/code",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frontend for the Hexlet computer components store"
+}
