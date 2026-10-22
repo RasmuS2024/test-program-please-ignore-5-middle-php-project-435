@@ -2,5 +2,15 @@
   "name": "@hexlet/code",
   "version": "1.0.0",
   "private": true,
-  "description": "Frontend for the Hexlet computer components store"
+  "description": "Online store backend and API contract",
+  "scripts": {
+    "contract": "tsp compile contract",
+    "contract:check": "tsp compile contract && git diff --exit-code -- contract/openapi.yaml"
+  },
+  "devDependencies": {
+    "@typespec/compiler": "^1.17.0",
+    "@typespec/http": "^1.17.0",
+    "@typespec/openapi": "^1.17.0",
+    "@typespec/openapi3": "^1.17.0"
+  }
 }

@@ -1,0 +1,665 @@
+openapi: 3.0.0
+info:
+  title: Online Store API
+  version: 1.0.0
+tags: []
+paths:
+  /api/categories:
+    get:
+      operationId: Categories_list
+      description: Return the category directory.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/health:
+    get:
+      operationId: Health_check
+      description: Liveness probe. Must not depend on PostgreSQL or the frontend.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/me:
+    get:
+      operationId: Me_get
+      description: Return the currently authenticated user.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - ApiKeyAuth: []
+  /api/orders:
+    post:
+      operationId: Orders_create
+      description: Create a paid order from the cart. Prices and totals are calculated by the server.
+      parameters: []
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ProblemDetails'
+                  - $ref: '#/components/schemas/UnavailableItemsProblem'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      security:
+        - ApiKeyAuth: []
+    get:
+      operationId: Orders_list
+      description: Return the current user's orders, newest first.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - ApiKeyAuth: []
+  /api/orders/{id}:
+    get:
+      operationId: Orders_get
+      description: Return one of the current user's orders. Other users' orders are reported as not found.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - ApiKeyAuth: []
+  /api/products:
+    get:
+      operationId: Products_list
+      description: Return a filtered and paginated product catalog.
+      parameters:
+        - name: category
+          in: query
+          required: false
+          description: Category slug. Omit or leave empty for all categories.
+          schema:
+            type: string
+          explode: false
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive substring of the product name.
+          schema:
+            type: string
+          explode: false
+        - name: priceMin
+          in: query
+          required: false
+          description: Minimum unit price, inclusive.
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: priceMax
+          in: query
+          required: false
+          description: Maximum unit price, inclusive.
+          schema:
+            type: integer
+            format: int32
+          explode: false
+        - name: available
+          in: query
+          required: false
+          description: true returns only available products; omit for all products.
+          schema:
+            type: boolean
+          explode: false
+        - name: page
+          in: query
+          required: false
+          description: Page number, starting at 1.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            default: 1
+          explode: false
+        - name: perPage
+          in: query
+          required: false
+          description: Page size. Defaults to 6; maximum 48.
+          schema:
+            type: integer
+            format: int32
+            maximum: 48
+            default: 6
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/products/{id}:
+    get:
+      operationId: Products_get
+      description: Return one product by its catalog id.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/promos:
+    get:
+      operationId: Promos_list
+      description: Return home page promo blocks with their products.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Promo'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/session:
+    post:
+      operationId: Session_login
+      description: Log in and open a server-side session. The session cookie is HttpOnly.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+    delete:
+      operationId: Session_logout
+      description: Destroy the current server-side session. The next GET /api/me returns 401.
+      parameters: []
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - ApiKeyAuth: []
+  /api/users:
+    post:
+      operationId: Users_create
+      description: Register a user and open an authenticated server-side session. The session cookie is HttpOnly.
+      parameters: []
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+components:
+  schemas:
+    CartItem:
+      type: object
+      required:
+        - productId
+        - quantity
+      properties:
+        productId:
+          type: string
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+    Category:
+      type: object
+      required:
+        - id
+        - slug
+        - name
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+    CreateOrderRequest:
+      type: object
+      required:
+        - items
+        - shipping
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartItem'
+          minItems: 1
+        shipping:
+          $ref: '#/components/schemas/ShippingDetails'
+    Credentials:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email address. The server compares addresses case-insensitively and trims whitespace.
+        password:
+          type: string
+          minLength: 6
+          description: Password, at least 6 characters.
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+    Money:
+      type: object
+      required:
+        - amount
+        - currency
+      properties:
+        amount:
+          type: integer
+          format: int32
+          description: Amount in whole rubles.
+        currency:
+          type: string
+          enum:
+            - RUB
+          description: Always RUB.
+      description: A monetary amount in whole rubles.
+    Order:
+      type: object
+      required:
+        - id
+        - status
+        - items
+        - shipping
+        - total
+        - createdAt
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - paid
+          description: Orders are created as paid and never change status.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        shipping:
+          $ref: '#/components/schemas/ShippingDetails'
+        total:
+          $ref: '#/components/schemas/Money'
+        createdAt:
+          type: string
+          format: date-time
+    OrderItem:
+      type: object
+      required:
+        - productId
+        - productName
+        - priceAtPurchase
+        - quantity
+      properties:
+        productId:
+          type: string
+        productName:
+          type: string
+          description: Product name snapshot at purchase time.
+        priceAtPurchase:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          description: Unit price snapshot at purchase time.
+        quantity:
+          type: integer
+          format: int32
+    PageMeta:
+      type: object
+      required:
+        - page
+        - perPage
+        - total
+        - totalPages
+      properties:
+        page:
+          type: integer
+          format: int32
+        perPage:
+          type: integer
+          format: int32
+        total:
+          type: integer
+          format: int32
+          description: Number of products matching the current filters.
+        totalPages:
+          type: integer
+          format: int32
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          $ref: '#/components/schemas/ProblemType'
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+      description: RFC 9457 Problem Details. The frontend chooses the user-facing message from type.
+    ProblemType:
+      type: string
+      enum:
+        - https://hexlet.io/problems/invalid-credentials
+        - https://hexlet.io/problems/email-taken
+        - https://hexlet.io/problems/validation-error
+        - https://hexlet.io/problems/address-required
+        - https://hexlet.io/problems/unavailable-items
+        - https://hexlet.io/problems/unauthorized
+        - https://hexlet.io/problems/not-found
+        - https://hexlet.io/problems/internal-error
+      description: Problem type URIs understood by the store frontend.
+    Product:
+      type: object
+      required:
+        - id
+        - slug
+        - name
+        - description
+        - price
+        - categoryId
+        - available
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          $ref: '#/components/schemas/Money'
+        categoryId:
+          type: string
+        imageUrl:
+          type: string
+          description: Product image path. Omit it when no image is available.
+        available:
+          type: boolean
+    ProductPage:
+      type: object
+      required:
+        - items
+        - meta
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    Promo:
+      type: object
+      required:
+        - id
+        - title
+        - text
+        - product
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        text:
+          type: string
+        product:
+          $ref: '#/components/schemas/Product'
+    ShippingDetails:
+      type: object
+      required:
+        - method
+        - recipientName
+        - phone
+      properties:
+        method:
+          type: string
+          enum:
+            - delivery
+            - pickup
+        recipientName:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+          description: Required when method is delivery.
+    UnavailableItemsProblem:
+      type: object
+      required:
+        - unavailableProductIds
+      properties:
+        unavailableProductIds:
+          type: array
+          items:
+            type: string
+          description: All missing or unavailable product IDs, not just the first one.
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+      description: Order validation failed because some products are missing or unavailable. type is unavailable-items.
+    User:
+      type: object
+      required:
+        - id
+        - email
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: cookie
+      name: PHPSESSID

@@ -17,6 +17,7 @@
 - Slim 4
 - PostgreSQL 16
 - Docker
+- Node.js / TypeSpec / OpenAPI 3.0 для описания контракта API
 
 ## Установка
 
@@ -25,6 +26,8 @@ git clone https://github.com/RasmuS2024/test-program-please-ignore-5-middle-php-
 cd test-program-please-ignore-5-middle-php-project-435
 make install
 ```
+
+`make install` ставит и PHP-, и npm-зависимости, поэтому для генерации контракта нужны Node.js и npm.
 
 Скопируйте шаблон окружения и задайте пароль PostgreSQL:
 
@@ -77,6 +80,22 @@ curl http://localhost:8080/api/health
 make test
 make lint
 make check
+```
+
+## Контракт API
+
+Источник истины — `contract/main.tsp`. Спецификация OpenAPI генерируется из него:
+
+```bash
+make contract
+```
+
+Результат — `contract/openapi.yaml`. Этот файл коммитится вместе с описанием контракта и не редактируется вручную.
+
+Проверить, что сгенерированная спецификация соответствует исходнику:
+
+```bash
+make contract-check
 ```
 
 ---
