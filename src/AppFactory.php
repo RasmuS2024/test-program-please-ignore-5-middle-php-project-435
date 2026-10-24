@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 namespace App;
 
+use App\Auth\AuthService;
+use App\Auth\Credentials;
+use App\Auth\SessionManager;
+use App\Auth\SessionMiddleware;
+use App\Auth\UserRepository;
 use App\Catalog\CatalogQuery;
 use App\Catalog\CatalogRepository;
 use InvalidArgumentException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use RuntimeException;
 use Slim\App;
 use Slim\Factory\AppFactory as SlimAppFactory;
 use Throwable;
@@ -24,9 +30,11 @@ final class AppFactory
     ): App {
         $config ??= Config::fromEnvironment();
         $catalog ??= new CatalogRepository($config);
+        $auth = new AuthService(new UserRepository($config));
 
         $app = SlimAppFactory::create();
         $app->addBodyParsingMiddleware();
+        $app->add(new SessionMiddleware());
         $app->add(
             static function (
                 ServerRequestInterface $request,
@@ -122,13 +130,139 @@ final class AppFactory
             }
         );
 
+        $app->post(
+            '/api/users',
+            static function (
+                ServerRequestInterface $request,
+                ResponseInterface $response
+            ) use ($auth): ResponseInterface {
+                try {
+                    $credentials = Credentials::fromParsedBody($request->getParsedBody());
+                } catch (InvalidArgumentException) {
+                    return self::problem(
+                        $response,
+                        400,
+                        'validation-error',
+                        'Validation error'
+                    );
+                }
+
+                try {
+                    $user = $auth->register($credentials);
+
+                    if ($user === null) {
+                        return self::problem($response, 409, 'email-taken', 'Email already taken');
+                    }
+
+                    $sessionId = self::session($request)->login((int) $user['id']);
+
+                    if ($sessionId === null) {
+                        return self::internalError($response);
+                    }
+
+                    return self::withSessionCookie(
+                        self::json($response, $user, 201),
+                        $sessionId,
+                        $request
+                    );
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
+            }
+        );
+
+        $app->post(
+            '/api/session',
+            static function (
+                ServerRequestInterface $request,
+                ResponseInterface $response
+            ) use ($auth): ResponseInterface {
+                try {
+                    $credentials = Credentials::fromParsedBody($request->getParsedBody());
+                } catch (InvalidArgumentException) {
+                    return self::problem(
+                        $response,
+                        400,
+                        'validation-error',
+                        'Validation error'
+                    );
+                }
+
+                try {
+                    $user = $auth->login($credentials);
+
+                    if ($user === null) {
+                        return self::problem(
+                            $response,
+                            401,
+                            'invalid-credentials',
+                            'Invalid credentials'
+                        );
+                    }
+
+                    $sessionId = self::session($request)->login((int) $user['id']);
+
+                    if ($sessionId === null) {
+                        return self::internalError($response);
+                    }
+
+                    return self::withSessionCookie(
+                        self::json($response, $user),
+                        $sessionId,
+                        $request
+                    );
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
+            }
+        );
+
+        $app->delete(
+            '/api/session',
+            static function (
+                ServerRequestInterface $request,
+                ResponseInterface $response
+            ): ResponseInterface {
+                try {
+                    self::session($request)->logout();
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
+
+                return $response
+                    ->withStatus(204)
+                    ->withHeader(
+                        'Set-Cookie',
+                        SessionManager::expiredCookieHeader(
+                            SessionManager::isSecureRequest($request)
+                        )
+                    );
+            }
+        );
+
         $app->get(
             '/api/me',
             static function (
                 ServerRequestInterface $request,
                 ResponseInterface $response
-            ): ResponseInterface {
-                return self::problem($response, 401, 'unauthorized', 'Unauthorized');
+            ) use ($auth): ResponseInterface {
+                $userId = self::session($request)->userId();
+
+                if ($userId === null) {
+                    return self::problem($response, 401, 'unauthorized', 'Unauthorized');
+                }
+
+                try {
+                    $user = $auth->user($userId);
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
+
+                if ($user === null) {
+                    return self::problem($response, 401, 'unauthorized', 'Unauthorized');
+                }
+
+                return self::json($response, $user);
             }
         );
 
@@ -164,6 +298,31 @@ final class AppFactory
         $app->get('/{path:.*}', $spa);
 
         return $app;
+    }
+
+    private static function session(ServerRequestInterface $request): SessionManager
+    {
+        $session = $request->getAttribute(SessionManager::class);
+
+        if (!$session instanceof SessionManager) {
+            throw new RuntimeException('Session middleware is not configured.');
+        }
+
+        return $session;
+    }
+
+    private static function withSessionCookie(
+        ResponseInterface $response,
+        string $sessionId,
+        ServerRequestInterface $request
+    ): ResponseInterface {
+        return $response->withHeader(
+            'Set-Cookie',
+            SessionManager::cookieHeader(
+                $sessionId,
+                SessionManager::isSecureRequest($request)
+            )
+        );
     }
 
     private static function json(
