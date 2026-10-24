@@ -17,7 +17,13 @@ final class ApiRoutesTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->app = AppFactory::create(new Config(8080, ''));
+        $databaseUrl = getenv('DATABASE_URL');
+
+        if (!is_string($databaseUrl) || $databaseUrl === '') {
+            self::fail('DATABASE_URL is required. Run make db-setup before the API tests.');
+        }
+
+        $this->app = AppFactory::create(new Config(8080, $databaseUrl));
     }
 
     public function testCategoriesAreReturned(): void
@@ -34,6 +40,7 @@ final class ApiRoutesTest extends TestCase
 
     public function testProductListSupportsCategoryAndAvailabilityFilters(): void
     {
+        $categoryId = $this->categoryId('videokarty');
         $response = $this->get('/api/products?category=videokarty&available=true');
         $body = $this->decode($response);
 
@@ -42,7 +49,7 @@ final class ApiRoutesTest extends TestCase
         self::assertSame(1, $body['meta']['totalPages']);
 
         foreach ($body['items'] as $product) {
-            self::assertSame('1', $product['categoryId']);
+            self::assertSame($categoryId, $product['categoryId']);
             self::assertTrue($product['available']);
         }
     }
@@ -58,9 +65,22 @@ final class ApiRoutesTest extends TestCase
         $pageBody = $this->decode($pageResponse);
 
         self::assertSame(2, $pageBody['meta']['page']);
-        self::assertSame(11, $pageBody['meta']['total']);
+        self::assertSame(12, $pageBody['meta']['total']);
         self::assertSame(2, $pageBody['meta']['totalPages']);
-        self::assertCount(5, $pageBody['items']);
+        self::assertCount(6, $pageBody['items']);
+    }
+
+    public function testProductListSupportsPriceFilter(): void
+    {
+        $response = $this->get('/api/products?priceMin=20000&priceMax=50000&perPage=48');
+        $body = $this->decode($response);
+
+        self::assertSame(200, $response->getStatusCode());
+
+        foreach ($body['items'] as $product) {
+            self::assertGreaterThanOrEqual(20000, $product['price']['amount']);
+            self::assertLessThanOrEqual(50000, $product['price']['amount']);
+        }
     }
 
     public function testProductListRejectsInvalidPagination(): void
@@ -74,14 +94,48 @@ final class ApiRoutesTest extends TestCase
         );
     }
 
-    public function testProductByIdIsReturned(): void
+    public function testUnknownCategoryReturnsEmptyPage(): void
     {
-        $response = $this->get('/api/products/1');
+        $response = $this->get('/api/products?category=unknown');
         $body = $this->decode($response);
 
         self::assertSame(200, $response->getStatusCode());
-        self::assertSame('1', $body['id']);
-        self::assertSame('/images/nvidia-geforce-rtx-4090.svg', $body['imageUrl']);
+        self::assertSame([], $body['items']);
+        self::assertSame(0, $body['meta']['total']);
+        self::assertSame(0, $body['meta']['totalPages']);
+    }
+
+    public function testProductByIdIsReturned(): void
+    {
+        $list = $this->decode($this->get('/api/products?perPage=48'));
+        self::assertNotEmpty($list['items']);
+
+        $expected = $list['items'][0];
+        $response = $this->get('/api/products/' . $expected['id']);
+        $body = $this->decode($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame($expected['id'], $body['id']);
+        self::assertArrayHasKey('imageUrl', $body);
+    }
+
+    public function testProductWithoutImageOmitsImageUrl(): void
+    {
+        $list = $this->decode($this->get('/api/products?perPage=48'));
+        $product = $this->findProduct($list, 'asrock-b650m-hdv-m2');
+
+        self::assertArrayNotHasKey('imageUrl', $product);
+    }
+
+    public function testUnavailableProductIsExcludedFromAvailableFilter(): void
+    {
+        $list = $this->decode($this->get('/api/products?perPage=48'));
+        $product = $this->findProduct($list, 'msi-mag-b760-tomahawk');
+
+        self::assertFalse($product['available']);
+
+        $available = $this->decode($this->get('/api/products?available=true&perPage=48'));
+        self::assertNotContains($product['id'], array_column($available['items'], 'id'));
     }
 
     public function testUnknownProductReturnsNotFoundProblem(): void
@@ -102,9 +156,17 @@ final class ApiRoutesTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode());
         self::assertCount(3, $body);
-        self::assertArrayHasKey('product', $body[0]);
-        self::assertArrayHasKey('price', $body[0]['product']);
-        self::assertArrayHasKey('categoryId', $body[0]['product']);
+
+        $productIds = [];
+        foreach ($body as $promo) {
+            self::assertArrayHasKey('product', $promo);
+            self::assertArrayHasKey('price', $promo['product']);
+            self::assertArrayHasKey('categoryId', $promo['product']);
+            self::assertTrue($promo['product']['available']);
+            $productIds[] = $promo['product']['id'];
+        }
+
+        self::assertCount(3, array_unique($productIds));
     }
 
     public function testAnonymousUserAlwaysGetsUnauthorizedProblem(): void
@@ -119,6 +181,24 @@ final class ApiRoutesTest extends TestCase
                 'status' => 401,
             ],
             $this->decode($response)
+        );
+    }
+
+    public function testCatalogReturnsInternalErrorWhenDatabaseIsUnavailable(): void
+    {
+        $app = AppFactory::create(
+            new Config(
+                8080,
+                'pgsql://invalid:invalid@127.0.0.1:1/invalid?connect_timeout=1'
+            )
+        );
+        $response = $this->getFrom($app, '/api/categories');
+
+        self::assertSame(500, $response->getStatusCode());
+        self::assertSame('application/json', $response->getHeaderLine('Content-Type'));
+        self::assertSame(
+            'https://hexlet.io/problems/internal-error',
+            $this->decode($response)['type']
         );
     }
 
@@ -158,11 +238,43 @@ final class ApiRoutesTest extends TestCase
         self::assertStringContainsString('<div id="root"></div>', (string) $response->getBody());
     }
 
+    private function categoryId(string $slug): string
+    {
+        foreach ($this->decode($this->get('/api/categories')) as $category) {
+            if ($category['slug'] === $slug) {
+                return $category['id'];
+            }
+        }
+
+        self::fail('Category not found: ' . $slug);
+    }
+
+    /**
+     * @param array{items: list<array<string, mixed>>} $list
+     *
+     * @return array<string, mixed>
+     */
+    private function findProduct(array $list, string $slug): array
+    {
+        foreach ($list['items'] as $product) {
+            if ($product['slug'] === $slug) {
+                return $product;
+            }
+        }
+
+        self::fail('Product not found: ' . $slug);
+    }
+
     private function get(string $uri): ResponseInterface
+    {
+        return $this->getFrom($this->app, $uri);
+    }
+
+    private function getFrom(App $app, string $uri): ResponseInterface
     {
         $request = (new ServerRequestFactory())->createServerRequest('GET', $uri);
 
-        return $this->app->handle($request);
+        return $app->handle($request);
     }
 
     /**

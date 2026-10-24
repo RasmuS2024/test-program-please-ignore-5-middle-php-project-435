@@ -5,6 +5,8 @@
     <file>src</file>
     <file>public</file>
     <file>tests</file>
+    <file>db</file>
+    <file>phinx.php</file>
 
     <arg name="extensions" value="php"/>
     <arg name="colors"/>

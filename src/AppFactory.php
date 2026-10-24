@@ -4,21 +4,26 @@ declare(strict_types=1);
 
 namespace App;
 
-use App\Catalog\StubCatalog;
+use App\Catalog\CatalogQuery;
+use App\Catalog\CatalogRepository;
 use InvalidArgumentException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Slim\App;
 use Slim\Factory\AppFactory as SlimAppFactory;
+use Throwable;
 
 final class AppFactory
 {
     private const PROBLEM_BASE = 'https://hexlet.io/problems/';
 
-    public static function create(?Config $config = null): App
-    {
+    public static function create(
+        ?Config $config = null,
+        ?CatalogRepository $catalog = null
+    ): App {
         $config ??= Config::fromEnvironment();
+        $catalog ??= new CatalogRepository($config);
 
         $app = SlimAppFactory::create();
         $app->addBodyParsingMiddleware();
@@ -46,8 +51,12 @@ final class AppFactory
             static function (
                 ServerRequestInterface $request,
                 ResponseInterface $response
-            ): ResponseInterface {
-                return self::json($response, StubCatalog::categories());
+            ) use ($catalog): ResponseInterface {
+                try {
+                    return self::json($response, $catalog->categories());
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
             }
         );
 
@@ -56,9 +65,9 @@ final class AppFactory
             static function (
                 ServerRequestInterface $request,
                 ResponseInterface $response
-            ): ResponseInterface {
+            ) use ($catalog): ResponseInterface {
                 try {
-                    $page = StubCatalog::search($request->getQueryParams());
+                    $query = CatalogQuery::fromArray($request->getQueryParams());
                 } catch (InvalidArgumentException) {
                     return self::problem(
                         $response,
@@ -68,7 +77,11 @@ final class AppFactory
                     );
                 }
 
-                return self::json($response, $page);
+                try {
+                    return self::json($response, $catalog->search($query));
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
             }
         );
 
@@ -78,9 +91,14 @@ final class AppFactory
                 ServerRequestInterface $request,
                 ResponseInterface $response,
                 array $args
-            ): ResponseInterface {
+            ) use ($catalog): ResponseInterface {
                 $id = $args['id'] ?? null;
-                $product = is_string($id) ? StubCatalog::product($id) : null;
+
+                try {
+                    $product = is_string($id) ? $catalog->product($id) : null;
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
 
                 if ($product === null) {
                     return self::problem($response, 404, 'not-found', 'Product not found');
@@ -95,8 +113,12 @@ final class AppFactory
             static function (
                 ServerRequestInterface $request,
                 ResponseInterface $response
-            ): ResponseInterface {
-                return self::json($response, StubCatalog::promos());
+            ) use ($catalog): ResponseInterface {
+                try {
+                    return self::json($response, $catalog->promos());
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
             }
         );
 
@@ -175,6 +197,16 @@ final class AppFactory
                 'status' => $status,
             ],
             $status
+        );
+    }
+
+    private static function internalError(ResponseInterface $response): ResponseInterface
+    {
+        return self::problem(
+            $response,
+            500,
+            'internal-error',
+            'Internal server error'
         );
     }
 }

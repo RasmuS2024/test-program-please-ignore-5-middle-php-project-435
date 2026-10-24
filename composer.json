@@ -4,8 +4,11 @@
     "type": "project",
     "require": {
         "php": "^8.3",
-        "slim/slim": "^4.15",
-        "slim/psr7": "^1.8"
+        "ext-pdo": "*",
+        "ext-pdo_pgsql": "*",
+        "robmorgan/phinx": "^0.16",
+        "slim/psr7": "^1.8",
+        "slim/slim": "^4.15"
     },
     "license": "MIT",
     "require-dev": {

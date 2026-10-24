@@ -42,6 +42,10 @@ jobs:
       - run: make build
       - run: make lint
       - run: npx playwright install --with-deps chromium
+      - name: Check seed idempotency
+        run: |
+          make db-setup
+          make db-seed
       - run: make test-api
 
       - name: Start application

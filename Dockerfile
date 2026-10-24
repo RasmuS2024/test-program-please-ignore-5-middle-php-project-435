@@ -13,7 +13,8 @@ RUN composer install \
     --no-interaction \
     --no-progress \
     --prefer-dist \
-    --optimize-autoloader
+    --optimize-autoloader \
+    --ignore-platform-req=ext-pdo_pgsql
 
 FROM php:8.3-cli-alpine AS app
 
