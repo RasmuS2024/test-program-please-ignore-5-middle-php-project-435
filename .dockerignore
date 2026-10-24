@@ -1,0 +1,10 @@
+.git
+.env
+.idea
+.phpunit.cache
+node_modules
+vendor
+tmp
+public/assets
+public/images
+public/index.html

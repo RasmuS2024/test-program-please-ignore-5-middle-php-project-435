@@ -29,6 +29,16 @@ make install
 
 `make install` ставит и PHP-, и npm-зависимости, поэтому для генерации контракта нужны Node.js и npm.
 
+### Фронтенд
+
+Фронтенд магазина приходит готовым npm-пакетом `@hexlet/php-online-store-frontend`. Собирать его не нужно: команда `make build` копирует готовый `dist` в `public/`:
+
+```bash
+make build
+```
+
+После обновления пакета фронтенда выполните `make build` повторно. Сгенерированные файлы в `public/assets`, `public/images` и `public/index.html` не коммитятся.
+
 Скопируйте шаблон окружения и задайте пароль PostgreSQL:
 
 ```bash
@@ -56,6 +66,7 @@ docker run -d \
 ## Запуск
 
 ```bash
+make build
 make start
 ```
 
@@ -72,7 +83,34 @@ curl http://localhost:8080/api/health
 # {"status":"ok"}
 ```
 
-Статика и API работают на одном порту: API — по путям `/api/...`, статика — из каталога `public/`.
+Статика и API работают на одном порту: API — по путям `/api/...`, статика — из каталога `public/`. Любой не-API адрес без существующего файла отдаёт `public/index.html`, поэтому прямые ссылки вроде `/cart`, `/account` и `/products/1` открываются после перезагрузки. Неизвестный путь внутри `/api/` отвечает JSON-ошибкой в формате Problem Details, а не HTML.
+
+На этом шаге каталог и промо-блоки отвечают временными заглушками. База данных, авторизация и заказы появятся на следующих шагах.
+
+Проверка статики, SPA-fallback и JSON-ошибки:
+
+```bash
+curl -sI http://localhost:8080/assets/$(ls public/assets | head -1) | grep -i content-type
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/cart
+# 200
+curl -s http://localhost:8080/api/nothing-here
+# {"type":"https://hexlet.io/problems/not-found","title":"Resource not found","status":404}
+```
+
+### Запуск в Docker
+
+Образ собирается из корня репозитория:
+
+```bash
+docker build -t online-store .
+docker run --rm \
+  -e PORT=8080 \
+  -e DATABASE_URL='postgres://postgres:password@localhost:5432/appdb' \
+  -p 8080:8080 \
+  online-store
+```
+
+Образ содержит `pdo_pgsql`, PHP-зависимости без dev-пакетов и собранный фронтенд. Порт берётся из `PORT`; `EXPOSE` не нужен. Точка входа `docker-entrypoint.sh` запускает сервер, а на шаге с базой данных сюда же будут добавлены миграции и заливка данных.
 
 ## Проверки
 
@@ -81,6 +119,8 @@ make test
 make lint
 make check
 ```
+
+Перед тестами SPA-fallback выполните `make build`, иначе соответствующий тест будет пропущен.
 
 ## Контракт API
 
