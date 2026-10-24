@@ -128,6 +128,11 @@ final class ApiRoutesTest extends TestCase
 
         self::assertSame(404, $response->getStatusCode());
         self::assertSame('application/json', $response->getHeaderLine('Content-Type'));
+
+        $rawBody = (string) $response->getBody();
+        self::assertJson($rawBody);
+        self::assertStringNotContainsString('<html', $rawBody);
+
         self::assertSame(
             [
                 'type' => 'https://hexlet.io/problems/not-found',

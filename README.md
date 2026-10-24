@@ -2,6 +2,8 @@
 
 [![hexlet-check](https://github.com/RasmuS2024/test-program-please-ignore-5-middle-php-project-435/actions/workflows/hexlet-check.yml/badge.svg)](https://github.com/RasmuS2024/test-program-please-ignore-5-middle-php-project-435/actions)
 
+[![main](https://github.com/RasmuS2024/test-program-please-ignore-5-middle-php-project-435/actions/workflows/main.yml/badge.svg)](https://github.com/RasmuS2024/test-program-please-ignore-5-middle-php-project-435/actions/workflows/main.yml)
+
 Реализуйте бекенд интернет-магазина комплектующих: регистрацию и авторизацию, каталог с
 фильтрами и пагинацией, промо-блоки главной, оформление заказа и личный кабинет с историей.
 Фреймворк выбираете сами, данные храните в PostgreSQL. Фронтенд предоставляет Хекслет —
@@ -15,7 +17,7 @@
 
 - PHP 8.3
 - Slim 4
-- PostgreSQL 16
+- PostgreSQL 18
 - Docker
 - Node.js / TypeSpec / OpenAPI 3.0 для описания контракта API
 
@@ -48,7 +50,7 @@ make build
 
 ### База данных
 
-Проект использует PostgreSQL 16. Для локальной разработки можно запустить отдельный контейнер на порту `5433`:
+Проект использует PostgreSQL 18. Для локальной разработки можно запустить отдельный контейнер на порту `5433`:
 
 ```bash
 docker run -d \
@@ -58,10 +60,10 @@ docker run -d \
   -e POSTGRES_PASSWORD=change-me \
   -p 127.0.0.1:5433:5432 \
   -v hexlet-store-pgdata:/var/lib/postgresql/data \
-  postgres:16-alpine
+  postgres:18-alpine
 ```
 
-Пароль должен совпадать с `DB_PASSWORD` и `DATABASE_URL` в `.env`. Порт `5432` не используется, чтобы не конфликтовать с другим PostgreSQL. Если контейнер уже создан, запустите его командой `docker start hexlet-store-postgres`.
+Пароль должен совпадать с `DB_PASSWORD` и `DATABASE_URL` в `.env`. Порт `5432` не используется, чтобы не конфликтовать с другим PostgreSQL. Если контейнер уже создан на PostgreSQL 16, пересоздайте его и том `hexlet-store-pgdata`: данных на этом шаге ещё нет. Если контейнер уже создан на 18, запустите его командой `docker start hexlet-store-postgres`.
 
 ## Запуск
 
@@ -114,13 +116,44 @@ docker run --rm \
 
 ## Проверки
 
+API-тесты не требуют браузера и запущенного сервера:
+
 ```bash
-make test
+make test-api
+```
+
+Линтер и API-тесты:
+
+```bash
 make lint
 make check
 ```
 
-Перед тестами SPA-fallback выполните `make build`, иначе соответствующий тест будет пропущен.
+Перед API-тестами SPA-fallback выполните `make build`, иначе соответствующий тест будет пропущен.
+
+### Браузерные тесты
+
+Playwright ставится вместе с npm-зависимостями через `make install`, браузер Chromium устанавливается отдельно один раз:
+
+```bash
+npx playwright install --with-deps chromium
+```
+
+Тесты не поднимают приложение. Запустите сервер в одном терминале:
+
+```bash
+make start
+```
+
+и прогоните тесты в другом:
+
+```bash
+APP_URL=http://localhost:8080 make test
+```
+
+Адрес приложения Playwright берёт из `APP_URL`, по умолчанию используется `http://localhost:8080`. Тесты выполняются в один поток, потому что меняют состояние базы. Для регистрации используйте уникальный email на каждый прогон.
+
+Скриншоты, видео, трейсы и HTML-отчёт попадают в `tmp/artifacts`. Каталог исключён из Git. В репозитории пока есть только временный smoke-тест; полный набор браузерных сценариев Хекслета подключается отдельно. Пока API авторизации и заказов не готов, соответствующие браузерные сценарии ожидаемо красные, поэтому в CI этот шаг временно не блокирует workflow.
 
 ## Контракт API
 
@@ -144,6 +177,8 @@ make contract-check
 <summary>Автоматические тесты Хекслета</summary>
 
 Тесты запускаются на каждый коммит. За запуск отвечает файл `.github/workflows/hexlet-check.yml` — не удаляйте и не переименовывайте ни его, ни репозиторий.
+
+Свой workflow `.github/workflows/main.yml` запускается на каждый push и pull request: он проверяет линтер, API-тесты и браузерные тесты. Браузерный шаг временно не блокирует сборку, пока API авторизации и заказов не готов.
 
 </details>
 

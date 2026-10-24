@@ -5,6 +5,7 @@ AGENTS.md
 /vendor/
 /node_modules/
 /.phpunit.cache/
+/tmp/
 /public/assets/
 /public/images/
 /public/index.html
