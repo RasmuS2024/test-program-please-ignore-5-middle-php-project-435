@@ -83,15 +83,187 @@ final class ApiRoutesTest extends TestCase
         }
     }
 
-    public function testProductListRejectsInvalidPagination(): void
+    public function testProductListReturnsDefaultPageMetaAndProductShape(): void
     {
-        $response = $this->get('/api/products?page=0');
+        $response = $this->get('/api/products');
+        $body = $this->decode($response);
+        $all = $this->decode($this->get('/api/products?perPage=48'));
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('application/json', $response->getHeaderLine('Content-Type'));
+        self::assertSame(1, $body['meta']['page']);
+        self::assertSame(6, $body['meta']['perPage']);
+        self::assertSame($all['meta']['total'], $body['meta']['total']);
+        self::assertSame(
+            (int) ceil($body['meta']['total'] / $body['meta']['perPage']),
+            $body['meta']['totalPages']
+        );
+        self::assertCount(min(6, $body['meta']['total']), $body['items']);
+        self::assertCount($all['meta']['total'], $all['items']);
+
+        foreach ($body['items'] as $product) {
+            $this->assertProductShape($product);
+        }
+    }
+
+    public function testEmptyProductFiltersAreIgnored(): void
+    {
+        $default = $this->decode($this->get('/api/products'));
+        $empty = $this->decode(
+            $this->get('/api/products?category=&q=&priceMin=&priceMax=&available=&page=&perPage=')
+        );
+
+        self::assertSame($default, $empty);
+    }
+
+    public function testProductSearchIsCaseInsensitiveAndMatchesNameOnly(): void
+    {
+        $lower = $this->decode($this->get('/api/products?q=rtx&perPage=48'));
+        $upper = $this->decode($this->get('/api/products?q=RTX&perPage=48'));
+        $trimmed = $this->decode($this->get('/api/products?q=%20RTX%20&perPage=48'));
+
+        self::assertGreaterThan(0, $lower['meta']['total']);
+        self::assertSame($lower['meta']['total'], $upper['meta']['total']);
+        self::assertSame($lower['items'], $upper['items']);
+        self::assertSame($lower['items'], $trimmed['items']);
+
+        foreach ($lower['items'] as $product) {
+            self::assertStringContainsStringIgnoringCase('rtx', $product['name']);
+        }
+
+        $descriptionOnly = $this->decode($this->get('/api/products?q=DLSS&perPage=48'));
+        self::assertSame([], $descriptionOnly['items']);
+        self::assertSame(0, $descriptionOnly['meta']['total']);
+    }
+
+    public function testProductPriceBoundsAreInclusiveAndIndependent(): void
+    {
+        $minimum = $this->decode($this->get('/api/products?priceMin=199990&perPage=48'));
+        self::assertSame(1, $minimum['meta']['total']);
+        self::assertSame('nvidia-geforce-rtx-4090', $minimum['items'][0]['slug']);
+
+        $maximum = $this->decode($this->get('/api/products?priceMax=7990&perPage=48'));
+        self::assertSame(1, $maximum['meta']['total']);
+        self::assertSame('asrock-b650m-hdv-m2', $maximum['items'][0]['slug']);
+
+        $exact = $this->decode(
+            $this->get('/api/products?priceMin=39990&priceMax=39990&perPage=48')
+        );
+        self::assertSame(2, $exact['meta']['total']);
+
+        foreach ($exact['items'] as $product) {
+            self::assertSame(39990, $product['price']['amount']);
+        }
+    }
+
+    public function testProductFiltersCanBeCombined(): void
+    {
+        $categoryId = $this->categoryId('videokarty');
+        $body = $this->decode(
+            $this->get(
+                '/api/products?category=videokarty&q=rtx'
+                . '&priceMin=39990&priceMax=59990&available=true&perPage=48'
+            )
+        );
+
+        self::assertSame(2, $body['meta']['total']);
+        self::assertCount(2, $body['items']);
+
+        foreach ($body['items'] as $product) {
+            self::assertSame($categoryId, $product['categoryId']);
+            self::assertStringContainsStringIgnoringCase('rtx', $product['name']);
+            self::assertGreaterThanOrEqual(39990, $product['price']['amount']);
+            self::assertLessThanOrEqual(59990, $product['price']['amount']);
+            self::assertTrue($product['available']);
+        }
+    }
+
+    public function testProductPaginationDoesNotOverlapAndHandlesPageBeyondLast(): void
+    {
+        $first = $this->decode($this->get('/api/products'));
+        $total = $first['meta']['total'];
+        $perPage = $first['meta']['perPage'];
+        $totalPages = $first['meta']['totalPages'];
+
+        self::assertSame(1, $first['meta']['page']);
+        self::assertGreaterThan(1, $totalPages);
+        self::assertSame((int) ceil($total / $perPage), $totalPages);
+
+        $seen = [];
+        $previousId = 0;
+
+        for ($page = 1; $page <= $totalPages; $page++) {
+            $body = $this->decode($this->get('/api/products?page=' . $page));
+
+            self::assertSame($page, $body['meta']['page']);
+            self::assertSame($total, $body['meta']['total']);
+            self::assertLessThanOrEqual($perPage, count($body['items']));
+
+            foreach ($body['items'] as $product) {
+                $id = (int) $product['id'];
+                self::assertGreaterThan($previousId, $id);
+                self::assertArrayNotHasKey($product['id'], $seen);
+                $seen[$product['id']] = true;
+                $previousId = $id;
+            }
+        }
+
+        self::assertCount($total, $seen);
+
+        $beyond = $this->decode($this->get('/api/products?page=' . ($totalPages + 1)));
+
+        self::assertSame([], $beyond['items']);
+        self::assertSame($totalPages + 1, $beyond['meta']['page']);
+        self::assertSame($total, $beyond['meta']['total']);
+        self::assertSame($totalPages, $beyond['meta']['totalPages']);
+    }
+
+    public function testProductListRespectsPerPageMaximum(): void
+    {
+        $all = $this->decode($this->get('/api/products?perPage=48'));
+
+        self::assertSame(48, $all['meta']['perPage']);
+        self::assertSame(1, $all['meta']['totalPages']);
+        self::assertCount($all['meta']['total'], $all['items']);
+
+        $response = $this->get('/api/products?perPage=49');
 
         self::assertSame(400, $response->getStatusCode());
         self::assertSame(
             'https://hexlet.io/problems/validation-error',
             $this->decode($response)['type']
         );
+    }
+
+    public function testProductListRejectsInvalidFilters(): void
+    {
+        $uris = [
+            '/api/products?page=0',
+            '/api/products?page=abc',
+            '/api/products?page=1.5',
+            '/api/products?perPage=0',
+            '/api/products?perPage=49',
+            '/api/products?perPage=abc',
+            '/api/products?priceMin=abc',
+            '/api/products?priceMin=1.5',
+            '/api/products?priceMax=-1',
+            '/api/products?available=yes',
+            '/api/products?available=2',
+            '/api/products?q[]=rtx',
+            '/api/products?category[]=videokarty',
+        ];
+
+        foreach ($uris as $uri) {
+            $response = $this->get($uri);
+
+            self::assertSame(400, $response->getStatusCode(), $uri);
+            self::assertSame('application/json', $response->getHeaderLine('Content-Type'), $uri);
+            self::assertSame(
+                'https://hexlet.io/problems/validation-error',
+                $this->decode($response)['type'],
+                $uri
+            );
+        }
     }
 
     public function testUnknownCategoryReturnsEmptyPage(): void
@@ -115,8 +287,20 @@ final class ApiRoutesTest extends TestCase
         $body = $this->decode($response);
 
         self::assertSame(200, $response->getStatusCode());
-        self::assertSame($expected['id'], $body['id']);
+        self::assertSame($expected, $body);
         self::assertArrayHasKey('imageUrl', $body);
+        $this->assertProductShape($body);
+    }
+
+    public function testProductByIdReturnsUnavailableProduct(): void
+    {
+        $list = $this->decode($this->get('/api/products?perPage=48'));
+        $expected = $this->findProduct($list, 'msi-mag-b760-tomahawk');
+        $body = $this->decode($this->get('/api/products/' . $expected['id']));
+
+        self::assertFalse($body['available']);
+        self::assertSame($expected, $body);
+        $this->assertProductShape($body);
     }
 
     public function testProductWithoutImageOmitsImageUrl(): void
@@ -133,20 +317,39 @@ final class ApiRoutesTest extends TestCase
         $product = $this->findProduct($list, 'msi-mag-b760-tomahawk');
 
         self::assertFalse($product['available']);
+        self::assertContains($product['id'], array_column($list['items'], 'id'));
 
         $available = $this->decode($this->get('/api/products?available=true&perPage=48'));
         self::assertNotContains($product['id'], array_column($available['items'], 'id'));
     }
 
+    public function testProductListAcceptsNumericBooleanAvailability(): void
+    {
+        $available = $this->decode($this->get('/api/products?available=1&perPage=48'));
+
+        self::assertGreaterThan(0, $available['meta']['total']);
+        foreach ($available['items'] as $product) {
+            self::assertTrue($product['available']);
+        }
+
+        $all = $this->decode($this->get('/api/products?available=0&perPage=48'));
+        $unavailable = $this->findProduct($all, 'msi-mag-b760-tomahawk');
+
+        self::assertFalse($unavailable['available']);
+    }
+
     public function testUnknownProductReturnsNotFoundProblem(): void
     {
-        $response = $this->get('/api/products/does-not-exist');
+        foreach (['does-not-exist', '999999'] as $id) {
+            $response = $this->get('/api/products/' . $id);
 
-        self::assertSame(404, $response->getStatusCode());
-        self::assertSame(
-            'https://hexlet.io/problems/not-found',
-            $this->decode($response)['type']
-        );
+            self::assertSame(404, $response->getStatusCode(), $id);
+            self::assertSame(
+                'https://hexlet.io/problems/not-found',
+                $this->decode($response)['type'],
+                $id
+            );
+        }
     }
 
     public function testPromosContainFullProducts(): void
@@ -236,6 +439,26 @@ final class ApiRoutesTest extends TestCase
         self::assertSame(200, $response->getStatusCode());
         self::assertSame('text/html; charset=UTF-8', $response->getHeaderLine('Content-Type'));
         self::assertStringContainsString('<div id="root"></div>', (string) $response->getBody());
+    }
+
+    /**
+     * @param array<string, mixed> $product
+     */
+    private function assertProductShape(array $product): void
+    {
+        foreach (['id', 'slug', 'name', 'description', 'price', 'categoryId', 'available'] as $key) {
+            self::assertArrayHasKey($key, $product);
+        }
+
+        self::assertIsString($product['id']);
+        self::assertIsString($product['slug']);
+        self::assertIsString($product['name']);
+        self::assertIsString($product['description']);
+        self::assertIsArray($product['price']);
+        self::assertIsInt($product['price']['amount']);
+        self::assertSame('RUB', $product['price']['currency']);
+        self::assertIsString($product['categoryId']);
+        self::assertIsBool($product['available']);
     }
 
     private function categoryId(string $slug): string
