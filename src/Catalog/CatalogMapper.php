@@ -56,24 +56,16 @@ final class CatalogMapper
      */
     public static function promo(array $row): array
     {
-        $product = [
-            'id' => (string) $row['product_id'],
-            'slug' => (string) $row['product_slug'],
-            'name' => (string) $row['product_name'],
-            'description' => (string) $row['product_description'],
-            'price' => [
-                'amount' => (int) $row['product_price_rub'],
-                'currency' => 'RUB',
-            ],
-            'categoryId' => (string) $row['product_category_id'],
-            'available' => self::boolean($row['product_available']),
-        ];
-
-        $imageUrl = $row['product_image_url'] ?? null;
-
-        if (is_string($imageUrl) && $imageUrl !== '') {
-            $product['imageUrl'] = $imageUrl;
-        }
+        $product = self::product([
+            'id' => $row['product_id'],
+            'slug' => $row['product_slug'],
+            'name' => $row['product_name'],
+            'description' => $row['product_description'],
+            'price_rub' => $row['product_price_rub'],
+            'category_id' => $row['product_category_id'],
+            'image_url' => $row['product_image_url'] ?? null,
+            'available' => $row['product_available'],
+        ]);
 
         return [
             'id' => (string) $row['promo_id'],

@@ -145,6 +145,7 @@ final class CatalogRepository
             . ' p.available AS product_available'
             . ' FROM promos pr'
             . ' JOIN products p ON p.id = pr.product_id'
+            . ' WHERE p.available = TRUE'
             . ' ORDER BY pr.id'
         )->fetchAll();
 

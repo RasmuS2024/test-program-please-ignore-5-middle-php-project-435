@@ -6,6 +6,8 @@ namespace App\Tests;
 
 use App\AppFactory;
 use App\Config;
+use App\Database\Connection;
+use PDO;
 use Psr\Http\Message\ResponseInterface;
 use Slim\App;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -358,18 +360,93 @@ final class ApiRoutesTest extends TestCase
         $body = $this->decode($response);
 
         self::assertSame(200, $response->getStatusCode());
-        self::assertCount(3, $body);
+        self::assertSame('application/json', $response->getHeaderLine('Content-Type'));
+        self::assertTrue(array_is_list($body));
+        self::assertGreaterThanOrEqual(2, count($body));
 
         $productIds = [];
         foreach ($body as $promo) {
+            self::assertArrayHasKey('id', $promo);
+            self::assertArrayHasKey('title', $promo);
+            self::assertArrayHasKey('text', $promo);
             self::assertArrayHasKey('product', $promo);
-            self::assertArrayHasKey('price', $promo['product']);
-            self::assertArrayHasKey('categoryId', $promo['product']);
+
+            self::assertIsString($promo['id']);
+            self::assertNotSame('', $promo['id']);
+            self::assertIsString($promo['title']);
+            self::assertNotSame('', $promo['title']);
+            self::assertIsString($promo['text']);
+            self::assertNotSame('', $promo['text']);
+            self::assertIsArray($promo['product']);
+
+            $this->assertProductShape($promo['product']);
             self::assertTrue($promo['product']['available']);
+
+            $product = $this->decode($this->get('/api/products/' . $promo['product']['id']));
+            self::assertSame($product, $promo['product']);
+
             $productIds[] = $promo['product']['id'];
         }
 
-        self::assertCount(3, array_unique($productIds));
+        self::assertCount(count($body), array_unique($productIds));
+    }
+
+    public function testPromosExcludeUnavailableProducts(): void
+    {
+        $promos = $this->decode($this->get('/api/promos'));
+        self::assertNotEmpty($promos);
+
+        $promo = $promos[0];
+        $productId = (int) $promo['product']['id'];
+        $pdo = $this->database();
+
+        try {
+            $statement = $pdo->prepare('UPDATE products SET available = FALSE WHERE id = :id');
+            $statement->execute(['id' => $productId]);
+
+            $remaining = $this->decode($this->get('/api/promos'));
+            $remainingProductIds = array_column(array_column($remaining, 'product'), 'id');
+
+            self::assertNotContains($promo['product']['id'], $remainingProductIds);
+            self::assertLessThan(count($promos), count($remaining));
+        } finally {
+            $statement = $pdo->prepare('UPDATE products SET available = TRUE WHERE id = :id');
+            $statement->execute(['id' => $productId]);
+        }
+
+        $restored = $this->decode($this->get('/api/promos'));
+        self::assertContains(
+            $promo['product']['id'],
+            array_column(array_column($restored, 'product'), 'id')
+        );
+    }
+
+    public function testPromosReturnEmptyListWhenNoBlocksExist(): void
+    {
+        $pdo = $this->database();
+        $rows = $pdo->query(
+            'SELECT id, slug, title, body, product_id FROM promos ORDER BY id'
+        )->fetchAll();
+        self::assertNotEmpty($rows);
+
+        try {
+            $pdo->exec('DELETE FROM promos');
+
+            $response = $this->get('/api/promos');
+
+            self::assertSame(200, $response->getStatusCode());
+            self::assertSame('application/json', $response->getHeaderLine('Content-Type'));
+            self::assertSame([], $this->decode($response));
+        } finally {
+            $statement = $pdo->prepare(
+                'INSERT INTO promos (id, slug, title, body, product_id)'
+                . ' VALUES (:id, :slug, :title, :body, :product_id)'
+            );
+
+            foreach ($rows as $row) {
+                $statement->execute($row);
+            }
+        }
     }
 
     public function testAnonymousUserAlwaysGetsUnauthorizedProblem(): void
@@ -486,6 +563,17 @@ final class ApiRoutesTest extends TestCase
         }
 
         self::fail('Product not found: ' . $slug);
+    }
+
+    private function database(): PDO
+    {
+        $databaseUrl = getenv('DATABASE_URL');
+
+        if (!is_string($databaseUrl) || $databaseUrl === '') {
+            self::fail('DATABASE_URL is required. Run make db-setup before the API tests.');
+        }
+
+        return Connection::fromConfig(new Config(8080, $databaseUrl));
     }
 
     private function get(string $uri): ResponseInterface
