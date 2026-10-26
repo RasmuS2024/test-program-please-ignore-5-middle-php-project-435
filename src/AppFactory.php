@@ -11,6 +11,11 @@ use App\Auth\SessionMiddleware;
 use App\Auth\UserRepository;
 use App\Catalog\CatalogQuery;
 use App\Catalog\CatalogRepository;
+use App\Orders\AddressRequiredException;
+use App\Orders\CreateOrder;
+use App\Orders\OrderRepository;
+use App\Orders\OrderService;
+use App\Orders\UnavailableItemsException;
 use InvalidArgumentException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -31,6 +36,7 @@ final class AppFactory
         $config ??= Config::fromEnvironment();
         $catalog ??= new CatalogRepository($config);
         $auth = new AuthService(new UserRepository($config));
+        $orders = new OrderService(new OrderRepository($config));
 
         $app = SlimAppFactory::create();
         $app->addBodyParsingMiddleware();
@@ -266,6 +272,110 @@ final class AppFactory
             }
         );
 
+        $app->post(
+            '/api/orders',
+            static function (
+                ServerRequestInterface $request,
+                ResponseInterface $response
+            ) use ($orders): ResponseInterface {
+                $userId = self::session($request)->userId();
+
+                if ($userId === null) {
+                    return self::problem($response, 401, 'unauthorized', 'Unauthorized');
+                }
+
+                try {
+                    $orderRequest = CreateOrder::fromParsedBody($request->getParsedBody());
+                } catch (AddressRequiredException) {
+                    return self::problem(
+                        $response,
+                        400,
+                        'address-required',
+                        'Address is required for delivery'
+                    );
+                } catch (InvalidArgumentException) {
+                    return self::problem(
+                        $response,
+                        400,
+                        'validation-error',
+                        'Validation error'
+                    );
+                }
+
+                try {
+                    $order = $orders->create($userId, $orderRequest);
+                } catch (UnavailableItemsException $exception) {
+                    return self::problem(
+                        $response,
+                        400,
+                        'unavailable-items',
+                        'Some products are unavailable',
+                        ['unavailableProductIds' => $exception->productIds]
+                    );
+                } catch (InvalidArgumentException) {
+                    return self::problem(
+                        $response,
+                        400,
+                        'validation-error',
+                        'Validation error'
+                    );
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
+
+                return self::json($response, $order, 201);
+            }
+        );
+
+        $app->get(
+            '/api/orders',
+            static function (
+                ServerRequestInterface $request,
+                ResponseInterface $response
+            ) use ($orders): ResponseInterface {
+                $userId = self::session($request)->userId();
+
+                if ($userId === null) {
+                    return self::problem($response, 401, 'unauthorized', 'Unauthorized');
+                }
+
+                try {
+                    return self::json($response, $orders->all($userId));
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
+            }
+        );
+
+        $app->get(
+            '/api/orders/{id}',
+            static function (
+                ServerRequestInterface $request,
+                ResponseInterface $response,
+                array $args
+            ) use ($orders): ResponseInterface {
+                $userId = self::session($request)->userId();
+
+                if ($userId === null) {
+                    return self::problem($response, 401, 'unauthorized', 'Unauthorized');
+                }
+
+                $id = $args['id'] ?? null;
+
+                try {
+                    $order = is_string($id) ? $orders->find($userId, $id) : null;
+                } catch (Throwable) {
+                    return self::internalError($response);
+                }
+
+                if ($order === null) {
+                    return self::problem($response, 404, 'not-found', 'Order not found');
+                }
+
+                return self::json($response, $order);
+            }
+        );
+
         $apiNotFound = static function (
             ServerRequestInterface $request,
             ResponseInterface $response
@@ -342,11 +452,15 @@ final class AppFactory
             ->withStatus($status);
     }
 
+    /**
+     * @param array<string, mixed> $extra
+     */
     private static function problem(
         ResponseInterface $response,
         int $status,
         string $type,
-        string $title
+        string $title,
+        array $extra = []
     ): ResponseInterface {
         return self::json(
             $response,
@@ -354,6 +468,7 @@ final class AppFactory
                 'type' => self::PROBLEM_BASE . $type,
                 'title' => $title,
                 'status' => $status,
+                ...$extra,
             ],
             $status
         );

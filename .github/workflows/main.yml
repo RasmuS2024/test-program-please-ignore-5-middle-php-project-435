@@ -54,10 +54,7 @@ jobs:
           nohup make start > tmp/app.log 2>&1 &
           timeout 60 bash -c 'until curl -sf "$APP_URL/api/health" >/dev/null; do sleep 1; done'
 
-      # TODO: remove continue-on-error once the orders API is implemented
-      # and the full Hexlet browser suite is green.
-      - name: Browser tests (expected failures until orders API is implemented)
-        continue-on-error: true
+      - name: Browser tests
         run: make test
 
       - name: Upload Playwright artifacts
